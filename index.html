@@ -3,226 +3,210 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP32 Power Monitor</title>
+    <title>BMS Smart Monitor</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
     <style>
-        /* Додаткові стилі для ефекту "скла" і плавних перемикачів */
-        body {
-            background-color: #0f172a; /* Глибокий синій колір фону */
-            color: #f8fafc;
-        }
-        .glass-card {
-            background: rgba(30, 41, 59, 0.7);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        
-        /* Стиль для тумблера-перемикача */
-        .toggle-checkbox:checked {
-            right: 0;
-            border-color: #10b981;
-        }
-        .toggle-checkbox:checked + .toggle-label {
-            background-color: #10b981;
-        }
+        body { background-color: #0f172a; color: #f8fafc; }
+        .glass-card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .toggle-checkbox:checked { right: 0; border-color: #10b981; }
+        .toggle-checkbox:checked + .toggle-label { background-color: #10b981; }
+        .cell-box { background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.05); transition: all 0.3s ease; }
     </style>
 </head>
-<body class="min-h-screen p-6 font-sans antialiased">
+<body class="min-h-screen p-4 md:p-6 font-sans antialiased">
 
-    <div class="max-w-6xl mx-auto">
-        <header class="flex justify-between items-center mb-8">
+    <div class="max-w-7xl mx-auto">
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
             <div>
                 <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">
-                    Smart Power Monitor
+                    BMS Telemetry Dashboard
                 </h1>
-                <p class="text-slate-400 text-sm mt-1">Live Telemetry & Control</p>
+                <p class="text-slate-400 text-sm mt-1">LiFePO4 8S Analyzer | Live Data</p>
             </div>
-            <div class="flex items-center gap-3">
+            <div class="flex items-center gap-3 bg-slate-800/50 px-4 py-2 rounded-full border border-slate-700">
                 <span class="relative flex h-3 w-3">
                   <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
                 </span>
-                <span class="text-emerald-400 text-sm font-medium" id="status">Підключено до MQTT</span>
+                <span class="text-emerald-400 text-sm font-medium" id="status">Підключення...</span>
             </div>
         </header>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
-            <div class="glass-card rounded-2xl p-6 flex flex-col gap-6 md:col-span-1">
-                <div>
-                    <h2 class="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-2">Напруга (V)</h2>
-                    <div class="text-5xl font-light text-blue-400" id="live-voltage">12.60 <span class="text-2xl text-slate-500">V</span></div>
-                </div>
-                <hr class="border-slate-700">
-                <div>
-                    <h2 class="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-2">Струм (A)</h2>
-                    <div class="text-5xl font-light text-emerald-400" id="live-current">1.50 <span class="text-2xl text-slate-500">A</span></div>
-                </div>
-                <hr class="border-slate-700">
+            <div class="flex flex-col gap-6 lg:col-span-1">
                 
-                <div class="mt-auto">
-                    <h2 class="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-4">Керування реле</h2>
-                    <div class="relative inline-block w-16 h-8 align-middle select-none transition duration-200 ease-in">
-                        <input type="checkbox" name="toggle" id="relay-toggle" class="toggle-checkbox absolute block w-8 h-8 rounded-full bg-white border-4 border-slate-600 appearance-none cursor-pointer transition-transform duration-300 z-10"/>
-                        <label for="relay-toggle" class="toggle-label block overflow-hidden h-8 rounded-full bg-slate-600 cursor-pointer transition-colors duration-300"></label>
+                <div class="glass-card rounded-2xl p-6 flex flex-col gap-4">
+                    <div>
+                        <h2 class="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">Напруга збірки (Total V)</h2>
+                        <div class="text-5xl font-light text-blue-400" id="live-voltage">--.-- <span class="text-2xl text-slate-500">V</span></div>
+                    </div>
+                    <hr class="border-slate-700">
+                    <div>
+                        <h2 class="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">Струм навантаження (ILOAD)</h2>
+                        <div class="text-5xl font-light text-emerald-400" id="live-current">--.-- <span class="text-2xl text-slate-500">A</span></div>
                     </div>
                 </div>
+
+                <div class="glass-card rounded-2xl p-6">
+                    <div class="flex justify-between items-end mb-4">
+                        <div>
+                            <h2 class="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">Температура</h2>
+                            <div class="text-3xl font-light text-orange-400" id="temp-val">--.- °C</div>
+                        </div>
+                        <div class="text-right">
+                            <h2 class="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">Статус BMS</h2>
+                            <div class="text-lg font-bold text-slate-300" id="bms-status">Очікування...</div>
+                        </div>
+                    </div>
+
+                    <hr class="border-slate-700 my-4">
+                    
+                    <h2 class="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-3">Команди та Реле</h2>
+                    <div class="flex justify-between items-center mb-4">
+                        <span class="text-sm text-slate-300">Тестовий вихід (Pin 2)</span>
+                        <div class="relative inline-block w-12 h-6 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" id="relay-toggle" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 border-slate-600 appearance-none cursor-pointer transition-transform duration-300 z-10"/>
+                            <label for="relay-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-slate-600 cursor-pointer transition-colors duration-300"></label>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-3 gap-2">
+                        <button onclick="sendCmd('demo')" class="bg-slate-700 hover:bg-slate-600 text-xs font-medium py-2 rounded text-slate-200 transition">Normal</button>
+                        <button onclick="sendCmd('fault')" class="bg-red-900/50 hover:bg-red-800 border border-red-700 text-xs font-medium py-2 rounded text-red-200 transition">Fault</button>
+                        <button onclick="sendCmd('reset')" class="bg-blue-900/50 hover:bg-blue-800 border border-blue-700 text-xs font-medium py-2 rounded text-blue-200 transition">Reset</button>
+                    </div>
+                </div>
+
             </div>
 
-            <div class="md:col-span-2 flex flex-col gap-6">
-                <div class="glass-card rounded-2xl p-6 h-64">
-                    <canvas id="voltageChart"></canvas>
+            <div class="lg:col-span-2 flex flex-col gap-6">
+                
+                <div class="glass-card rounded-2xl p-6">
+                    <h2 class="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-4">Напруги комірок (U1 - U8)</h2>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div class="cell-box rounded-xl p-3 text-center" id="box-1"><div class="text-xs text-slate-500 mb-1">Cell 1</div><div class="text-xl font-mono text-slate-200" id="cell-1">-.---</div></div>
+                        <div class="cell-box rounded-xl p-3 text-center" id="box-2"><div class="text-xs text-slate-500 mb-1">Cell 2</div><div class="text-xl font-mono text-slate-200" id="cell-2">-.---</div></div>
+                        <div class="cell-box rounded-xl p-3 text-center" id="box-3"><div class="text-xs text-slate-500 mb-1">Cell 3</div><div class="text-xl font-mono text-slate-200" id="cell-3">-.---</div></div>
+                        <div class="cell-box rounded-xl p-3 text-center" id="box-4"><div class="text-xs text-slate-500 mb-1">Cell 4</div><div class="text-xl font-mono text-slate-200" id="cell-4">-.---</div></div>
+                        <div class="cell-box rounded-xl p-3 text-center" id="box-5"><div class="text-xs text-slate-500 mb-1">Cell 5</div><div class="text-xl font-mono text-slate-200" id="cell-5">-.---</div></div>
+                        <div class="cell-box rounded-xl p-3 text-center" id="box-6"><div class="text-xs text-slate-500 mb-1">Cell 6</div><div class="text-xl font-mono text-slate-200" id="cell-6">-.---</div></div>
+                        <div class="cell-box rounded-xl p-3 text-center" id="box-7"><div class="text-xs text-slate-500 mb-1">Cell 7</div><div class="text-xl font-mono text-slate-200" id="cell-7">-.---</div></div>
+                        <div class="cell-box rounded-xl p-3 text-center" id="box-8"><div class="text-xs text-slate-500 mb-1">Cell 8</div><div class="text-xl font-mono text-slate-200" id="cell-8">-.---</div></div>
+                    </div>
                 </div>
-                <div class="glass-card rounded-2xl p-6 h-64">
-                    <canvas id="currentChart"></canvas>
-                </div>
-            </div>
 
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 h-64">
+                    <div class="glass-card rounded-2xl p-4 h-full relative">
+                        <canvas id="voltageChart"></canvas>
+                    </div>
+                    <div class="glass-card rounded-2xl p-4 h-full relative">
+                        <canvas id="currentChart"></canvas>
+                    </div>
+                </div>
+
+            </div>
         </div>
     </div>
 
     <script>
         // ==========================================
-        // 1. ТВОЇ НАЛАШТУВАННЯ (Впиши свої дані)
+        // 1. НАЛАШТУВАННЯ (Зміни пароль!)
         // ==========================================
-        
-        // MQTT Налаштування (Увага: порт 8884 для WebSockets)
         const MQTT_BROKER = 'wss://43324e275a814bac9013e89b6a839f95.s1.eu.hivemq.cloud:8884/mqtt';
         const MQTT_USER = 'esp32_user';
-        const MQTT_PASS = "hg%^jk#S@oigcf&*#@bsefukj1234567"; // Впиши свій пароль від HiveMQ
+        const MQTT_PASS = 'ТУТ_ТВІЙ_ПАРОЛЬ_ВІД_HIVEMQ'; // <--- ОБОВ'ЯЗКОВО ВПИШИ ПАРОЛЬ!
         const TOPIC_TELEMETRY = 'esp32/telemetry/live';
         const TOPIC_CONTROL = 'esp32/control';
-
-        // Firebase Налаштування (REST API Endpoint)
         const FIREBASE_URL = 'https://esp32-telemetry-444fa-default-rtdb.europe-west1.firebasedatabase.app/history.json';
 
         // ==========================================
-        // 2. ІНІЦІАЛІЗАЦІЯ ГРАФІКІВ
+        // 2. ГРАФІКИ
         // ==========================================
-        const ctxVol = document.getElementById('voltageChart').getContext('2d');
-        const ctxCur = document.getElementById('currentChart').getContext('2d');
+        const commonOptions = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: 'rgba(255,255,255,0.05)' } } }, animation: { duration: 0 } };
+        
+        const voltageChart = new Chart(document.getElementById('voltageChart').getContext('2d'), { type: 'line', data: { labels: [], datasets: [{ label: 'Напруга (V)', data: [], borderColor: '#60a5fa', backgroundColor: 'rgba(96, 165, 250, 0.1)', borderWidth: 2, pointRadius: 0, tension: 0.4, fill: true }] }, options: commonOptions });
+        const currentChart = new Chart(document.getElementById('currentChart').getContext('2d'), { type: 'line', data: { labels: [], datasets: [{ label: 'Струм (A)', data: [], borderColor: '#34d399', backgroundColor: 'rgba(52, 211, 153, 0.1)', borderWidth: 2, pointRadius: 0, tension: 0.4, fill: true }] }, options: commonOptions });
 
-        const commonOptions = {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-                x: { grid: { display: false }, ticks: { display: false } }, // Ховаємо мітки часу для краси
-                y: { grid: { color: 'rgba(255, 255, 255, 0.05)' } }
-            },
-            animation: { duration: 0 } // Вимикаємо анімацію при кожному оновленні для швидкодії
-        };
-
-        const voltageChart = new Chart(ctxVol, {
-            type: 'line',
-            data: { labels: [], datasets: [{ label: 'Напруга (V)', data: [], borderColor: '#60a5fa', backgroundColor: 'rgba(96, 165, 250, 0.1)', borderWidth: 2, pointRadius: 0, tension: 0.4, fill: true }] },
-            options: commonOptions
-        });
-
-        const currentChart = new Chart(ctxCur, {
-            type: 'line',
-            data: { labels: [], datasets: [{ label: 'Струм (A)', data: [], borderColor: '#34d399', backgroundColor: 'rgba(52, 211, 153, 0.1)', borderWidth: 2, pointRadius: 0, tension: 0.4, fill: true }] },
-            options: commonOptions
-        });
-
-        // Функція додавання точки на графік (зберігаємо лише останні 30 точок)
-        function addDataToChart(chart, label, data) {
-            chart.data.labels.push(label);
-            chart.data.datasets[0].data.push(data);
-            if (chart.data.labels.length > 30) {
-                chart.data.labels.shift();
-                chart.data.datasets[0].data.shift();
-            }
+        function addData(chart, data) {
+            chart.data.labels.push(''); chart.data.datasets[0].data.push(data);
+            if (chart.data.labels.length > 30) { chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
             chart.update();
         }
 
-        // ==========================================
-        // 3. ЗАВАНТАЖЕННЯ ІСТОРІЇ З FIREBASE
-        // ==========================================
+        // Завантаження історії
         async function loadHistory() {
             try {
-                // Запитуємо останні 30 записів з бази
-                const response = await fetch(`${FIREBASE_URL}?orderBy="$key"&limitToLast=30`);
-                const data = await response.json();
-                
-                if (data) {
-                    console.log("Історію завантажено:", data);
-                    Object.values(data).forEach(record => {
-                        // record.v - напруга, record.c - струм
-                        addDataToChart(voltageChart, '', record.v);
-                        addDataToChart(currentChart, '', record.c);
-                    });
-                }
-            } catch (error) {
-                console.error("Помилка завантаження історії з Firebase:", error);
-            }
+                const res = await fetch(`${FIREBASE_URL}?orderBy="$key"&limitToLast=30`);
+                const data = await res.json();
+                if (data) Object.values(data).forEach(r => { addData(voltageChart, r.v); addData(currentChart, r.c); });
+            } catch (e) { console.error("Firebase error", e); }
         }
 
         // ==========================================
-        // 4. ПІДКЛЮЧЕННЯ ДО MQTT (ЖИВІ ДАНІ ТА КЕРУВАННЯ)
+        // 3. MQTT ТА ЛОГІКА
         // ==========================================
-        const statusEl = document.getElementById('status');
-        const liveVoltageEl = document.getElementById('live-voltage');
-        const liveCurrentEl = document.getElementById('live-current');
-        const relayToggle = document.getElementById('relay-toggle');
-
-        const client = mqtt.connect(MQTT_BROKER, {
-            username: MQTT_USER,
-            password: MQTT_PASS,
-            clientId: 'web_client_' + Math.random().toString(16).substr(2, 8)
-        });
+        const client = mqtt.connect(MQTT_BROKER, { username: MQTT_USER, password: MQTT_PASS, clientId: 'web_' + Math.random().toString(16).substr(2, 8) });
 
         client.on('connect', () => {
-            console.log('Підключено до MQTT!');
-            statusEl.textContent = 'Підключено (Онлайн)';
-            statusEl.classList.replace('text-emerald-400', 'text-emerald-400'); // Залишаємо зеленим
-            
-            // Підписуємося на топік з телеметрією
+            document.getElementById('status').textContent = 'Онлайн (Дані йдуть)';
             client.subscribe(TOPIC_TELEMETRY);
         });
 
         client.on('message', (topic, message) => {
             if (topic === TOPIC_TELEMETRY) {
                 try {
-                    const payload = JSON.parse(message.toString());
+                    const p = JSON.parse(message.toString());
                     
-                    // Оновлюємо великі цифри
-                    liveVoltageEl.innerHTML = `${payload.voltage.toFixed(2)} <span class="text-2xl text-slate-500">V</span>`;
-                    liveCurrentEl.innerHTML = `${payload.current.toFixed(2)} <span class="text-2xl text-slate-500">A</span>`;
+                    // Головні показники
+                    document.getElementById('live-voltage').innerHTML = `${p.voltage.toFixed(2)} <span class="text-2xl text-slate-500">V</span>`;
+                    document.getElementById('live-current').innerHTML = `${p.current.toFixed(2)} <span class="text-2xl text-slate-500">A</span>`;
+                    document.getElementById('temp-val').innerText = `${p.TEMP.toFixed(1)} °C`;
                     
-                    // Додаємо нові точки на графік
-                    addDataToChart(voltageChart, '', payload.voltage);
-                    addDataToChart(currentChart, '', payload.current);
-                    
-                } catch (e) {
-                    console.error("Помилка парсингу JSON:", e);
-                }
+                    // Графіки
+                    addData(voltageChart, p.voltage);
+                    addData(currentChart, p.current);
+
+                    // Комірки
+                    for(let i=1; i<=8; i++) {
+                        let u = p["U"+i];
+                        if(u !== undefined) {
+                            document.getElementById(`cell-${i}`).innerText = u.toFixed(3) + ' V';
+                            // Візуалізація аварійних комірок (менше 2.8 або більше 3.65)
+                            const box = document.getElementById(`box-${i}`);
+                            if (u > 3.65 || u < 2.8) box.style.borderColor = 'rgba(239, 68, 68, 0.5)'; // Червоний
+                            else box.style.borderColor = 'rgba(255, 255, 255, 0.05)'; // Норма
+                        }
+                    }
+
+                    // Статус BMS
+                    const statusEl = document.getElementById('bms-status');
+                    if(p.FAULT === 0) {
+                        statusEl.innerText = "Система в нормі";
+                        statusEl.className = "text-lg font-bold text-emerald-400";
+                    } else {
+                        statusEl.innerText = p.fault_text || `Помилка (Код ${p.FAULT})`;
+                        statusEl.className = "text-lg font-bold text-red-500 animate-pulse";
+                    }
+
+                } catch (e) {}
             }
         });
 
-        client.on('error', (err) => {
-            console.error('Помилка MQTT:', err);
-            statusEl.textContent = 'Помилка підключення';
-            statusEl.classList.replace('text-emerald-400', 'text-red-500');
+        // Відправка текстових команд (Normal, Fault, Reset)
+        function sendCmd(command) {
+            client.publish(TOPIC_CONTROL, JSON.stringify({ cmd: command }));
+        }
+
+        // Відправка команди реле
+        document.getElementById('relay-toggle').addEventListener('change', (e) => {
+            client.publish(TOPIC_CONTROL, JSON.stringify({ relay: e.target.checked }));
         });
 
-        // ==========================================
-        // 5. ВІДПРАВКА КОМАНД НА ESP32
-        // ==========================================
-        relayToggle.addEventListener('change', function(e) {
-            const isChecked = e.target.checked;
-            const command = JSON.stringify({ relay: isChecked });
-            
-            client.publish(TOPIC_CONTROL, command);
-            console.log("Відправлено команду:", command);
-        });
-
-        // Запускаємо завантаження історії при відкритті сторінки
         loadHistory();
-
     </script>
 </body>
 </html>
