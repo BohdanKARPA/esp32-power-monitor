@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Power Monitor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+    <style>
+        /* Додаткові стилі для ефекту "скла" і плавних перемикачів */
+        body {
+            background-color: #0f172a; /* Глибокий синій колір фону */
+            color: #f8fafc;
+        }
+        .glass-card {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        /* Стиль для тумблера-перемикача */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #10b981;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #10b981;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-6 font-sans antialiased">
+
+    <div class="max-w-6xl mx-auto">
+        <header class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">
+                    Smart Power Monitor
+                </h1>
+                <p class="text-slate-400 text-sm mt-1">Live Telemetry & Control</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="relative flex h-3 w-3">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                </span>
+                <span class="text-emerald-400 text-sm font-medium" id="status">Підключено до MQTT</span>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            
+            <div class="glass-card rounded-2xl p-6 flex flex-col gap-6 md:col-span-1">
+                <div>
+                    <h2 class="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-2">Напруга (V)</h2>
+                    <div class="text-5xl font-light text-blue-400" id="live-voltage">12.60 <span class="text-2xl text-slate-500">V</span></div>
+                </div>
+                <hr class="border-slate-700">
+                <div>
+                    <h2 class="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-2">Струм (A)</h2>
+                    <div class="text-5xl font-light text-emerald-400" id="live-current">1.50 <span class="text-2xl text-slate-500">A</span></div>
+                </div>
+                <hr class="border-slate-700">
+                
+                <div class="mt-auto">
+                    <h2 class="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-4">Керування реле</h2>
+                    <div class="relative inline-block w-16 h-8 align-middle select-none transition duration-200 ease-in">
+                        <input type="checkbox" name="toggle" id="relay-toggle" class="toggle-checkbox absolute block w-8 h-8 rounded-full bg-white border-4 border-slate-600 appearance-none cursor-pointer transition-transform duration-300 z-10"/>
+                        <label for="relay-toggle" class="toggle-label block overflow-hidden h-8 rounded-full bg-slate-600 cursor-pointer transition-colors duration-300"></label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="md:col-span-2 flex flex-col gap-6">
+                <div class="glass-card rounded-2xl p-6 h-64">
+                    <canvas id="voltageChart"></canvas>
+                </div>
+                <div class="glass-card rounded-2xl p-6 h-64">
+                    <canvas id="currentChart"></canvas>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. ТВОЇ НАЛАШТУВАННЯ (Впиши свої дані)
+        // ==========================================
+        
+        // MQTT Налаштування (Увага: порт 8884 для WebSockets)
+        const MQTT_BROKER = 'wss://43324e275a814bac9013e89b6a839f95.s1.eu.hivemq.cloud:8884/mqtt';
+        const MQTT_USER = 'esp32_user';
+        const MQTT_PASS = "hg%^jk#S@oigcf&*#@bsefukj1234567"; // Впиши свій пароль від HiveMQ
+        const TOPIC_TELEMETRY = 'esp32/telemetry/live';
+        const TOPIC_CONTROL = 'esp32/control';
+
+        // Firebase Налаштування (REST API Endpoint)
+        const FIREBASE_URL = 'https://esp32-telemetry-444fa-default-rtdb.europe-west1.firebasedatabase.app/history.json';
+
+        // ==========================================
+        // 2. ІНІЦІАЛІЗАЦІЯ ГРАФІКІВ
+        // ==========================================
+        const ctxVol = document.getElementById('voltageChart').getContext('2d');
+        const ctxCur = document.getElementById('currentChart').getContext('2d');
+
+        const commonOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { grid: { display: false }, ticks: { display: false } }, // Ховаємо мітки часу для краси
+                y: { grid: { color: 'rgba(255, 255, 255, 0.05)' } }
+            },
+            animation: { duration: 0 } // Вимикаємо анімацію при кожному оновленні для швидкодії
+        };
+
+        const voltageChart = new Chart(ctxVol, {
+            type: 'line',
+            data: { labels: [], datasets: [{ label: 'Напруга (V)', data: [], borderColor: '#60a5fa', backgroundColor: 'rgba(96, 165, 250, 0.1)', borderWidth: 2, pointRadius: 0, tension: 0.4, fill: true }] },
+            options: commonOptions
+        });
+
+        const currentChart = new Chart(ctxCur, {
+            type: 'line',
+            data: { labels: [], datasets: [{ label: 'Струм (A)', data: [], borderColor: '#34d399', backgroundColor: 'rgba(52, 211, 153, 0.1)', borderWidth: 2, pointRadius: 0, tension: 0.4, fill: true }] },
+            options: commonOptions
+        });
+
+        // Функція додавання точки на графік (зберігаємо лише останні 30 точок)
+        function addDataToChart(chart, label, data) {
+            chart.data.labels.push(label);
+            chart.data.datasets[0].data.push(data);
+            if (chart.data.labels.length > 30) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+            chart.update();
+        }
+
+        // ==========================================
+        // 3. ЗАВАНТАЖЕННЯ ІСТОРІЇ З FIREBASE
+        // ==========================================
+        async function loadHistory() {
+            try {
+                // Запитуємо останні 30 записів з бази
+                const response = await fetch(`${FIREBASE_URL}?orderBy="$key"&limitToLast=30`);
+                const data = await response.json();
+                
+                if (data) {
+                    console.log("Історію завантажено:", data);
+                    Object.values(data).forEach(record => {
+                        // record.v - напруга, record.c - струм
+                        addDataToChart(voltageChart, '', record.v);
+                        addDataToChart(currentChart, '', record.c);
+                    });
+                }
+            } catch (error) {
+                console.error("Помилка завантаження історії з Firebase:", error);
+            }
+        }
+
+        // ==========================================
+        // 4. ПІДКЛЮЧЕННЯ ДО MQTT (ЖИВІ ДАНІ ТА КЕРУВАННЯ)
+        // ==========================================
+        const statusEl = document.getElementById('status');
+        const liveVoltageEl = document.getElementById('live-voltage');
+        const liveCurrentEl = document.getElementById('live-current');
+        const relayToggle = document.getElementById('relay-toggle');
+
+        const client = mqtt.connect(MQTT_BROKER, {
+            username: MQTT_USER,
+            password: MQTT_PASS,
+            clientId: 'web_client_' + Math.random().toString(16).substr(2, 8)
+        });
+
+        client.on('connect', () => {
+            console.log('Підключено до MQTT!');
+            statusEl.textContent = 'Підключено (Онлайн)';
+            statusEl.classList.replace('text-emerald-400', 'text-emerald-400'); // Залишаємо зеленим
+            
+            // Підписуємося на топік з телеметрією
+            client.subscribe(TOPIC_TELEMETRY);
+        });
+
+        client.on('message', (topic, message) => {
+            if (topic === TOPIC_TELEMETRY) {
+                try {
+                    const payload = JSON.parse(message.toString());
+                    
+                    // Оновлюємо великі цифри
+                    liveVoltageEl.innerHTML = `${payload.voltage.toFixed(2)} <span class="text-2xl text-slate-500">V</span>`;
+                    liveCurrentEl.innerHTML = `${payload.current.toFixed(2)} <span class="text-2xl text-slate-500">A</span>`;
+                    
+                    // Додаємо нові точки на графік
+                    addDataToChart(voltageChart, '', payload.voltage);
+                    addDataToChart(currentChart, '', payload.current);
+                    
+                } catch (e) {
+                    console.error("Помилка парсингу JSON:", e);
+                }
+            }
+        });
+
+        client.on('error', (err) => {
+            console.error('Помилка MQTT:', err);
+            statusEl.textContent = 'Помилка підключення';
+            statusEl.classList.replace('text-emerald-400', 'text-red-500');
+        });
+
+        // ==========================================
+        // 5. ВІДПРАВКА КОМАНД НА ESP32
+        // ==========================================
+        relayToggle.addEventListener('change', function(e) {
+            const isChecked = e.target.checked;
+            const command = JSON.stringify({ relay: isChecked });
+            
+            client.publish(TOPIC_CONTROL, command);
+            console.log("Відправлено команду:", command);
+        });
+
+        // Запускаємо завантаження історії при відкритті сторінки
+        loadHistory();
+
+    </script>
+</body>
+</html>
